@@ -217,6 +217,18 @@ Perf notes:
     .relationship-item .muted{color:var(--muted);}
     .relationship-metrics{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted);}
     .relationship-metrics span{background:var(--pill);border-radius:999px;padding:2px 8px;}
+    .analysis-lead{margin:8px 0 16px;color:var(--muted);max-width:720px;}
+    .analysis-subhead{margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+    .analysis-grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+    .analysis-block{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px;min-height:180px;}
+    .analysis-summary{margin:0;color:var(--muted);font-size:13px;line-height:1.5;}
+    .analysis-stats{list-style:none;margin:0;padding:0;display:grid;gap:6px;}
+    .analysis-stats li{display:flex;justify-content:space-between;align-items:center;border-radius:12px;padding:6px 10px;background:var(--kpi-surface);border:1px solid var(--kpi-border);font-size:13px;}
+    [data-theme="dark"] .analysis-stats li{background:var(--glass);border-color:var(--border);}
+    .analysis-stat-label{font-weight:600;color:var(--kpi-heading);margin-right:8px;}
+    .analysis-stat-value{font-variant-numeric:tabular-nums;color:var(--kpi-value);font-weight:600;}
+    .analysis-footer{margin-top:auto;font-size:12px;color:var(--muted);line-height:1.4;}
+    .analysis-empty{font-size:13px;color:var(--muted);margin:0;}
     .relationship-next{font-size:12px;color:var(--muted);}
     .relationship-empty{font-size:13px;color:var(--muted);}
     .event-connections{margin-top:10px;padding:10px;border-radius:12px;background:var(--panel);border:1px solid var(--border);display:flex;flex-direction:column;gap:6px;}
@@ -507,6 +519,7 @@ header .scope{display:inline-flex; align-items:center; gap:8px}
 </div>
   <nav role="navigation" aria-label="Primary">
     <button class="tab-btn" data-testid="nav-dashboard" data-route="#/dashboard" aria-current="page">Dashboard</button>
+    <button class="tab-btn" data-testid="nav-analysis" data-route="#/analysis">Analysis</button>
     <button class="tab-btn" data-testid="nav-events" data-route="#/events">Events</button>
     <button class="tab-btn" data-testid="nav-post" data-route="#/post">Post-Event</button>
     <button class="tab-btn" data-testid="nav-timeline" data-route="#/timeline">Timeline</button>
@@ -596,6 +609,21 @@ header .scope{display:inline-flex; align-items:center; gap:8px}
       </div>
       <div id="dataHealth" class="relationship-health-grid"></div>
     </div>
+  </section>
+
+  <section id="analysis" class="tab card" role="region" aria-labelledby="h-analysis" hidden>
+    <div class="row">
+      <h3 id="h-analysis">Analysis</h3>
+      <div class="spacer"></div>
+      <p class="small muted">Explains the current operating metrics based on connected portfolio data.</p>
+    </div>
+    <p class="analysis-lead">The analysis blends operational metrics across events with trend-based forecasts updated on each refresh.</p>
+    <h4 class="analysis-subhead" id="analysis-actual-heading">Operational Insights</h4>
+    <div class="grid analysis-grid" id="analysisActual" role="list" aria-labelledby="analysis-actual-heading"></div>
+    <div class="hr"></div>
+    <h4 class="analysis-subhead" id="analysis-predict-heading">Statistical Predictions</h4>
+    <p class="small muted">Predictions are separated from actuals and rely on lightweight statistical models calibrated to your dataset.</p>
+    <div class="grid analysis-grid" id="analysisForecast" role="list" aria-labelledby="analysis-predict-heading"></div>
   </section>
 
   <!-- EVENTS -->
@@ -1222,7 +1250,7 @@ const state={
 let eventAddrAuto=null;
 let poiAddrAuto=null;
 /* ---------- Router (hash) ---------- */
-const ROUTES=["#/dashboard","#/events","#/timeline","#/vendors","#/budget","#/tasks","#/map","#/settings","#/post"];
+const ROUTES=["#/dashboard","#/analysis","#/events","#/timeline","#/vendors","#/budget","#/tasks","#/map","#/settings","#/post"];
 function navigate(hash){
   const h=ROUTES.includes(hash)?hash:"#/dashboard";
   if(location.hash!==h) location.hash=h;
@@ -2213,6 +2241,377 @@ function renderDataHealth(){
   container.appendChild(frag);
 }
 
+function buildAnalysisCard({ title="", summary="", stats=[], footer="" }={}) {
+  const card = document.createElement("article");
+  card.className = "analysis-block";
+  card.setAttribute("role","listitem");
+
+  const heading = document.createElement("h4");
+  heading.textContent = title || "Insight";
+  card.appendChild(heading);
+
+  if(summary){
+    const p = document.createElement("p");
+    p.className = "analysis-summary";
+    p.textContent = summary;
+    card.appendChild(p);
+  }
+
+  if(Array.isArray(stats) && stats.length){
+    const list = document.createElement("ul");
+    list.className = "analysis-stats";
+    stats.forEach(item=>{
+      if(!item) return;
+      const li = document.createElement("li");
+      if(item.label){
+        const label = document.createElement("span");
+        label.className = "analysis-stat-label";
+        label.textContent = item.label;
+        li.appendChild(label);
+      }
+      const value = document.createElement("span");
+      value.className = "analysis-stat-value";
+      value.textContent = item.value != null ? String(item.value) : "—";
+      li.appendChild(value);
+      list.appendChild(li);
+    });
+    card.appendChild(list);
+  }
+
+  if(footer){
+    const foot = document.createElement("p");
+    foot.className = "analysis-footer";
+    foot.textContent = footer;
+    card.appendChild(foot);
+  }
+
+  return card;
+}
+
+function renderAnalysis(){
+  const actualWrap = qs("#analysisActual");
+  const forecastWrap = qs("#analysisForecast");
+  if(!(actualWrap && forecastWrap)) return;
+  actualWrap.innerHTML = "";
+  forecastWrap.innerHTML = "";
+
+  const graph = state.graph;
+  if(!graph){
+    actualWrap.innerHTML = '<p class="analysis-empty">Add events to view analysis.</p>';
+    forecastWrap.innerHTML = '<p class="analysis-empty">Capture data points to unlock predictions.</p>';
+    return;
+  }
+
+  const today = todayYMD();
+  const contexts = Array.from(graph.contexts?.values()||[]).filter(ctx=>ctx?.event);
+  const events = Array.isArray(store.data.events)?store.data.events:[];
+  const tasksRaw = Array.isArray(store.data.tasks)?store.data.tasks:[];
+  const notes = Array.isArray(store.data.notes)?store.data.notes:[];
+
+  const totalEvents = events.length;
+  const upcomingEvents = events.filter(ev=>ev?.eventDate && !isBefore(ev.eventDate, today));
+  const upcoming30 = events.filter(ev=>{
+    if(!ev?.eventDate) return false;
+    const diff = diffInDays(ev.eventDate, today);
+    return diff!==null && diff>=0 && diff<=30;
+  });
+  const completedEvents = events.filter(ev=>eventHasEnded(ev, today));
+  const connectionAvg = contexts.length
+    ? contexts.reduce((sum,ctx)=>sum+(ctx.metrics?.connectionScore||0),0)/contexts.length
+    : 0;
+  const fullyLinked = Array.isArray(graph.fullyLinkedEvents)?graph.fullyLinkedEvents.length:0;
+  const topConnected = contexts.slice().sort((a,b)=>(b.metrics?.connectionScore||0)-(a.metrics?.connectionScore||0))[0]||null;
+  const topConnectedLabel = topConnected?.event?.title||"";
+  const topConnectedScore = topConnected?.metrics?.connectionScore||0;
+
+  const totalTasks = contexts.reduce((sum,ctx)=>sum+(ctx.metrics?.tasks?.total||0),0);
+  const completedTasks = contexts.reduce((sum,ctx)=>sum+(ctx.metrics?.tasks?.completed||0),0);
+  const overdueTasks = contexts.reduce((sum,ctx)=>sum+(ctx.metrics?.tasks?.overdue||0),0);
+  const completionPercent = totalTasks?Math.round((completedTasks/Math.max(totalTasks,1))*100):0;
+  const remainingTasks = Math.max(0,totalTasks-completedTasks);
+  const inProgress = tasksRaw.filter(t=>t?.status==="In Progress").length;
+  const dueSoonGlobal = contexts.reduce((sum,ctx)=>{
+    const list = Array.isArray(ctx.tasks)?ctx.tasks:[];
+    const count = list.filter(task=>{
+      if(!task || task.status==="Completed" || !task.dueDate) return false;
+      const diff = diffInDays(task.dueDate, today);
+      return diff!==null && diff>=0 && diff<=7;
+    }).length;
+    return sum + count;
+  },0);
+
+  const totalForecast = contexts.reduce((sum,ctx)=>sum+(ctx.metrics?.budget?.forecast||0),0);
+  const totalActual = contexts.reduce((sum,ctx)=>sum+(ctx.metrics?.budget?.actual||0),0);
+  const variance = totalActual-totalForecast;
+  const utilization = totalForecast?totalActual/totalForecast:0;
+
+  const eventsWithout = graph.eventsWithout||{ tasks:[], timeline:[], budget:[], vendors:[], notes:[], pois:[] };
+  const missingTasks = Array.isArray(eventsWithout.tasks)?eventsWithout.tasks.length:0;
+  const missingVendors = Array.isArray(eventsWithout.vendors)?eventsWithout.vendors.length:0;
+  const missingBudget = Array.isArray(eventsWithout.budget)?eventsWithout.budget.length:0;
+  const missingLocation = Array.isArray(graph.eventsMissingLocation)?graph.eventsMissingLocation.length:0;
+  const unlinkedVendors = Array.isArray(graph.unlinkedVendors)?graph.unlinkedVendors.length:0;
+  const orphans = graph.orphans||{ tasks:[], timeline:[], budget:[], notes:[], vendorLinks:[], pois:[] };
+  const orphanRecords = Object.values(orphans).reduce((sum,list)=>sum+(Array.isArray(list)?list.length:0),0);
+
+  const ratingSamples = notes.filter(note=>{
+    if(!note || !note.eventId) return false;
+    const ev = graph.eventsById?.get?.(note.eventId);
+    if(!ev) return false;
+    if(!eventHasEnded(ev, today)) return false;
+    const rating = Number(note.rating);
+    return Number.isFinite(rating);
+  });
+  const avgRating = ratingSamples.length
+    ? ratingSamples.reduce((sum,n)=>sum+Number(n.rating),0)/ratingSamples.length
+    : 0;
+  const ratingStd = ratingSamples.length>1
+    ? Math.sqrt(ratingSamples.reduce((sum,n)=>{
+        const diff = Number(n.rating)-avgRating;
+        return sum+diff*diff;
+      },0)/(ratingSamples.length-1))
+    : 0;
+
+  const fmtInt = n=>Number.isFinite(n)?Math.round(n).toLocaleString():"—";
+  const formatMoney = n=>`$${fmtMoney(n)}`;
+  const formatSignedMoney = n=>{
+    if(!Number.isFinite(n) || n===0) return "$0.00";
+    return `${n>0?"+":"-"}$${fmtMoney(Math.abs(n))}`;
+  };
+  const connectionAvgDisplay = Number.isFinite(connectionAvg)
+    ? (Math.round(connectionAvg*10)/10).toFixed(1)
+    : "0.0";
+
+  const actualCards = [
+    {
+      title:"Portfolio Snapshot",
+      summary: totalEvents
+        ? `${fmtInt(upcomingEvents.length)} upcoming • ${fmtInt(completedEvents.length)} completed • Avg connection ${connectionAvgDisplay}`
+        : "No events captured yet.",
+      stats:[
+        { label:"Total Events", value: fmtInt(totalEvents) },
+        { label:"Upcoming (30d)", value: fmtInt(upcoming30.length) },
+        { label:"Fully Linked", value: fmtInt(fullyLinked) }
+      ],
+      footer: topConnectedLabel
+        ? `Most connected: ${topConnectedLabel} (score ${fmtInt(topConnectedScore)}).`
+        : "Link budgets, tasks, vendors, and schedules to strengthen connectivity."
+    },
+    {
+      title:"Task Performance",
+      summary: totalTasks
+        ? `${completionPercent}% complete across ${fmtInt(totalTasks)} tasks; ${fmtInt(overdueTasks)} overdue.`
+        : "No tasks captured for the current filters.",
+      stats:[
+        { label:"Completed", value: fmtInt(completedTasks) },
+        { label:"In Progress", value: fmtInt(inProgress) },
+        { label:"Due ≤7d", value: fmtInt(dueSoonGlobal) }
+      ],
+      footer: totalTasks
+        ? `Remaining ${fmtInt(remainingTasks)} tasks • ${fmtInt(dueSoonGlobal)} due within 7 days.`
+        : "Capture tasks to monitor execution pace."
+    },
+    {
+      title:"Budget Health",
+      summary: totalForecast
+        ? `Running at ${(utilization*100).toFixed(1)}% of forecast.`
+        : "No budget lines recorded.",
+      stats:[
+        { label:"Forecast", value: formatMoney(totalForecast) },
+        { label:"Actual", value: formatMoney(totalActual) },
+        { label:"Variance", value: totalForecast||totalActual ? formatSignedMoney(variance) : "—" }
+      ],
+      footer: totalForecast
+        ? `Variance indicates ${variance>0?"overspend risk":"capacity"} of ${formatSignedMoney(variance)}.`
+        : "Add forecast and actual spend to unlock budget analytics."
+    },
+    {
+      title:"Data Coverage",
+      summary:`${fmtInt(missingTasks)} events missing tasks • ${fmtInt(missingVendors)} missing vendors • ${fmtInt(missingBudget)} without budget lines.`,
+      stats:[
+        { label:"Missing Tasks", value: fmtInt(missingTasks) },
+        { label:"Missing Vendors", value: fmtInt(missingVendors) },
+        { label:"Orphan Records", value: fmtInt(orphanRecords) }
+      ],
+      footer:`${fmtInt(missingLocation)} events lack coordinates; ${fmtInt(unlinkedVendors)} vendors unassigned.`
+    }
+  ];
+
+  const completedWithDate = tasksRaw.filter(t=>t?.status==="Completed" && t.completedDate);
+  const last30 = completedWithDate.filter(t=>{
+    const completed = (t.completedDate||"").slice(0,10);
+    const diff = diffInDays(today, completed);
+    return diff!==null && diff>=0 && diff<=30;
+  });
+  let avgDailyCompletion = 0;
+  if(last30.length){
+    let maxDiff = 0;
+    last30.forEach(t=>{
+      const diff = diffInDays(today, (t.completedDate||"").slice(0,10));
+      if(diff!==null && diff>maxDiff) maxDiff = diff;
+    });
+    const windowDays = Math.max(1, maxDiff+1);
+    avgDailyCompletion = last30.length/windowDays;
+  }else if(completedWithDate.length){
+    const sorted = completedWithDate
+      .map(t=>(t.completedDate||"").slice(0,10))
+      .filter(Boolean)
+      .sort();
+    if(sorted.length){
+      const span = diffInDays(sorted[sorted.length-1], sorted[0]) || 0;
+      const windowDays = Math.max(1, span+1);
+      avgDailyCompletion = completedWithDate.length/windowDays;
+    }
+  }
+  const expectedCompletions14 = avgDailyCompletion>0?Math.round(avgDailyCompletion*14):0;
+  const predictedPercent = totalTasks
+    ? Math.min(100, completionPercent + Math.round((Math.min(remainingTasks, expectedCompletions14)/Math.max(totalTasks,1))*100))
+    : 0;
+  const finishDays = avgDailyCompletion>0?Math.ceil(remainingTasks/avgDailyCompletion):null;
+  const finishDate = finishDays!=null?fmtDate(addDays(today, finishDays)):"TBD";
+
+  const formatMonthLabel = ym=>{
+    const d = parseYMD(`${ym}-01`);
+    return d?d.toLocaleDateString(undefined,{month:"short",year:"numeric"}):ym;
+  };
+
+  const monthlyCounts = new Map();
+  events.forEach(ev=>{
+    if(!ev?.eventDate) return;
+    const key = ev.eventDate.slice(0,7);
+    if(!key) return;
+    monthlyCounts.set(key,(monthlyCounts.get(key)||0)+1);
+  });
+  const sortedMonths = Array.from(monthlyCounts.keys()).sort();
+  let forecastNext = 0;
+  let slope = 0;
+  let lastMonthLabel = sortedMonths.length?sortedMonths[sortedMonths.length-1]:"";
+  let lastMonthCount = lastMonthLabel?monthlyCounts.get(lastMonthLabel)||0:0;
+  if(sortedMonths.length>=2){
+    const counts = sortedMonths.map(m=>monthlyCounts.get(m)||0);
+    const xs = counts.map((_,idx)=>idx);
+    const n = counts.length;
+    const sumX = xs.reduce((acc,x)=>acc+x,0);
+    const sumY = counts.reduce((acc,y)=>acc+y,0);
+    const sumXX = xs.reduce((acc,x)=>acc+x*x,0);
+    const sumXY = counts.reduce((acc,y,idx)=>acc+xs[idx]*y,0);
+    const denom = n*sumXX - sumX*sumX;
+    slope = denom!==0 ? (n*sumXY - sumX*sumY)/denom : 0;
+    const intercept = (sumY - slope*sumX)/n;
+    const nextX = xs[xs.length-1]+1;
+    forecastNext = Math.max(0, Math.round(intercept + slope*nextX));
+  }else if(sortedMonths.length===1){
+    forecastNext = monthlyCounts.get(sortedMonths[0])||0;
+  }else{
+    forecastNext = upcomingEvents.length;
+  }
+  const trendLabel = slope>0.15?"increasing":slope<-0.15?"declining":"stable";
+  const nextMonthDate = lastMonthLabel?(()=>{
+    const d = parseYMD(`${lastMonthLabel}-01`);
+    if(!d) return "";
+    d.setMonth(d.getMonth()+1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  })():"";
+  const nextMonthLabel = nextMonthDate?formatMonthLabel(nextMonthDate):"Next month";
+
+  const completionSummary = totalTasks
+    ? (avgDailyCompletion>0
+        ? `Projected to reach ${predictedPercent}% completion in 14 days at ${avgDailyCompletion.toFixed(1)} tasks/day.`
+        : `${fmtInt(remainingTasks)} tasks remaining; completion trend unavailable.`)
+    : "No tasks recorded to project completion.";
+  const completionFooter = totalTasks
+    ? `Based on ${fmtInt(completedTasks)} completed of ${fmtInt(totalTasks)} tracked tasks.`
+    : "Add tasks to unlock projections.";
+
+  const eventSummary = totalEvents
+    ? `Forecast ${fmtInt(forecastNext)} events for ${nextMonthLabel} (${trendLabel} trend).`
+    : "No events recorded to project pipeline.";
+  const eventFooter = sortedMonths.length
+    ? `Linear regression across ${sortedMonths.length} month${sortedMonths.length===1?"":"s"} of event dates.`
+    : "Forecast defaults to upcoming pipeline until more history accrues.";
+
+  const completionStats = [
+    { label:"Remaining", value: fmtInt(remainingTasks) },
+    { label:"Avg Daily", value: avgDailyCompletion>0?avgDailyCompletion.toFixed(1):"—" },
+    { label:"Projected Finish", value: avgDailyCompletion>0?finishDate:"TBD" }
+  ];
+  const eventStats = [
+    { label:"Last Month", value: lastMonthLabel?`${formatMonthLabel(lastMonthLabel)} • ${fmtInt(lastMonthCount)}`:"—" },
+    { label:"Trend / month", value: slope?`${slope>=0?"+":""}${slope.toFixed(2)}`:"0.00" },
+    { label:"Next Month", value: fmtInt(forecastNext) }
+  ];
+
+  const completionRatio = totalTasks?completedTasks/Math.max(totalTasks,1):0;
+  const projectedActual = totalForecast
+    ? (totalActual>=totalForecast
+        ? totalActual
+        : totalActual + (totalForecast-totalActual)*completionRatio)
+    : totalActual;
+  const projectedVariance = projectedActual-totalForecast;
+  const budgetSummary = totalForecast
+    ? `Projected close ${formatMoney(projectedActual)} (${formatSignedMoney(projectedVariance)} vs forecast).`
+    : "Add budget lines to generate projections.";
+  const budgetFooter = totalForecast
+    ? `Weights ${completionPercent}% task completion against remaining forecast of ${formatMoney(totalForecast)}.`
+    : "Budget projections become available once forecast data is entered.";
+  const budgetStats = [
+    { label:"Actual", value: formatMoney(totalActual) },
+    { label:"Projected Close", value: formatMoney(projectedActual) },
+    { label:"Variance", value: totalForecast?formatSignedMoney(projectedVariance):"—" }
+  ];
+
+  const predictedRating = ratingSamples.length
+    ? clamp(avgRating + ((completionPercent-80)/100)*0.4, 0, 5)
+    : 4.6;
+  const ratingCi = ratingSamples.length?Math.max(0, ratingStd/Math.max(1, Math.sqrt(ratingSamples.length))):0;
+  const ratingSummary = ratingSamples.length
+    ? `Expected ${predictedRating.toFixed(2)} ± ${ratingCi.toFixed(2)} from current trend.`
+    : "Insufficient surveys—using 4.60 benchmark as placeholder.";
+  const ratingFooter = ratingSamples.length
+    ? `Based on ${ratingSamples.length} post-event rating${ratingSamples.length===1?"":"s"}; σ=${ratingStd.toFixed(2)}.`
+    : "Capture post-event ratings to improve forecast confidence.";
+  const ratingStats = [
+    { label:"Historical Avg", value: ratingSamples.length?avgRating.toFixed(2):"—" },
+    { label:"Predicted Next", value: predictedRating.toFixed(2) },
+    { label:"CI (±)", value: ratingSamples.length?ratingCi.toFixed(2):"—" }
+  ];
+
+  const actualFrag = fragment();
+  actualCards.forEach(card=>actualFrag.appendChild(buildAnalysisCard(card)));
+  actualWrap.appendChild(actualFrag);
+
+  const predictionCards = [
+    {
+      title:"Task Completion Outlook",
+      summary:completionSummary,
+      stats:completionStats,
+      footer:completionFooter
+    },
+    {
+      title:"Event Load Forecast",
+      summary:eventSummary,
+      stats:eventStats,
+      footer:eventFooter
+    },
+    {
+      title:"Budget Projection",
+      summary:budgetSummary,
+      stats:budgetStats,
+      footer:budgetFooter
+    },
+    {
+      title:"Satisfaction Forecast",
+      summary:ratingSummary,
+      stats:ratingStats,
+      footer:ratingFooter
+    }
+  ];
+
+  const forecastFrag = fragment();
+  predictionCards.forEach(card=>forecastFrag.appendChild(buildAnalysisCard(card)));
+  forecastWrap.appendChild(forecastFrag);
+}
+
 /* ---------- Events table & form actions ---------- */
 function renderEventsTable(){
   const list=qs("#eventCards"); if(!list) return; list.innerHTML="";
@@ -2634,6 +3033,7 @@ function renderAll(context){
   renderKPIs();
   renderEventConnectivity();
   renderDataHealth();
+  renderAnalysis();
   renderEventsTable();
   renderTasksTable();
   renderKanban();
