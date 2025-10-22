@@ -195,6 +195,18 @@ Perf notes:
     .icon{width:18px;height:18px;display:inline-block}
     main{padding:18px;max-width:1320px;margin:0 auto calc(56px + env(safe-area-inset-bottom))}
     .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+    .analysis-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:12px}
+    .analysis-card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+    .analysis-card h4{margin:0;font-size:16px;font-weight:700;color:var(--text)}
+    .analysis-metrics{display:grid;gap:14px}
+    .analysis-metric .metric-label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+    .analysis-metric .metric-value{font-size:24px;font-weight:700;color:var(--accent)}
+    .analysis-metric .metric-detail{font-size:13px;color:var(--text);opacity:.9}
+    .analysis-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+    .analysis-list li{border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--card);box-shadow:var(--shadow)}
+    .analysis-item-title{font-weight:600;font-size:14px}
+    .analysis-item-detail{font-size:13px;color:var(--text);margin-top:4px}
+    .analysis-item-meta{font-size:12px;color:var(--muted);margin-top:6px}
     .connectivity-card{margin-top:18px;display:flex;flex-direction:column;gap:14px;}
     .relationship-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;}
     .relationship-item{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--card);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px;}
@@ -507,6 +519,7 @@ header .scope{display:inline-flex; align-items:center; gap:8px}
 </div>
   <nav role="navigation" aria-label="Primary">
     <button class="tab-btn" data-testid="nav-dashboard" data-route="#/dashboard" aria-current="page">Dashboard</button>
+    <button class="tab-btn" data-testid="nav-analysis" data-route="#/analysis">Analysis</button>
     <button class="tab-btn" data-testid="nav-events" data-route="#/events">Events</button>
     <button class="tab-btn" data-testid="nav-post" data-route="#/post">Post-Event</button>
     <button class="tab-btn" data-testid="nav-timeline" data-route="#/timeline">Timeline</button>
@@ -595,6 +608,27 @@ header .scope{display:inline-flex; align-items:center; gap:8px}
         <div class="small muted">Spot missing associations and orphaned records to strengthen BI insights.</div>
       </div>
       <div id="dataHealth" class="relationship-health-grid"></div>
+    </div>
+  </section>
+
+  <!-- ANALYSIS -->
+  <section id="analysis" class="tab card" role="region" aria-labelledby="h-analysis" hidden>
+    <div class="row">
+      <h3 id="h-analysis">Analysis</h3>
+      <div class="spacer"></div>
+      <div class="small muted">Compare actual metrics with independent statistical projections for the selected scope.</div>
+    </div>
+    <div class="analysis-grid">
+      <div class="analysis-card" aria-live="polite">
+        <h4>Operational Metrics</h4>
+        <p class="small muted">Realized performance from filtered events.</p>
+        <div id="analysisActualBody" class="analysis-body"></div>
+      </div>
+      <div class="analysis-card" aria-live="polite">
+        <h4>Statistical Predictions</h4>
+        <p class="small muted">Forecasts generated independently from the actuals.</p>
+        <div id="analysisPredictionsBody" class="analysis-body"></div>
+      </div>
     </div>
   </section>
 
@@ -1222,7 +1256,7 @@ const state={
 let eventAddrAuto=null;
 let poiAddrAuto=null;
 /* ---------- Router (hash) ---------- */
-const ROUTES=["#/dashboard","#/events","#/timeline","#/vendors","#/budget","#/tasks","#/map","#/settings","#/post"];
+const ROUTES=["#/dashboard","#/analysis","#/events","#/timeline","#/vendors","#/budget","#/tasks","#/map","#/settings","#/post"];
 function navigate(hash){
   const h=ROUTES.includes(hash)?hash:"#/dashboard";
   if(location.hash!==h) location.hash=h;
@@ -2213,6 +2247,209 @@ function renderDataHealth(){
   container.appendChild(frag);
 }
 
+function renderAnalysis(){
+  const actualEl=qs("#analysisActualBody");
+  const predictionsEl=qs("#analysisPredictionsBody");
+  if(!(actualEl && predictionsEl)) return;
+
+  const graph=state.graph;
+  if(!graph){
+    actualEl.innerHTML='<p class="muted">No data yet.</p>';
+    predictionsEl.innerHTML='<p class="muted">No data yet.</p>';
+    return;
+  }
+
+  const contexts=Array.from(graph.contexts?.values()||[]);
+  const inScope=contexts.filter(ctx=>ctx?.event && graph.scopeIds.has(ctx.event.id));
+
+  if(!inScope.length){
+    actualEl.innerHTML='<p class="muted">Adjust filters or scope to include at least one event.</p>';
+    predictionsEl.innerHTML='<p class="muted">Predictions require at least one event in scope.</p>';
+    return;
+  }
+
+  const totalEvents=inScope.length;
+  const statusCounts={};
+  inScope.forEach(ctx=>{
+    const status=(ctx.event?.status||"Unspecified").trim()||"Unspecified";
+    statusCounts[status]=(statusCounts[status]||0)+1;
+  });
+  const statusSummary=Object.entries(statusCounts)
+    .sort((a,b)=>b[1]-a[1])
+    .map(([status,count])=>`${status}: ${count}`)
+    .join(' • ');
+
+  const totalTasks=inScope.reduce((sum,ctx)=>sum+(ctx.metrics?.tasks?.total||0),0);
+  const totalCompleted=inScope.reduce((sum,ctx)=>sum+(ctx.metrics?.tasks?.completed||0),0);
+  const totalOverdue=inScope.reduce((sum,ctx)=>sum+(ctx.metrics?.tasks?.overdue||0),0);
+  const completionRate=totalTasks?Math.round((totalCompleted/totalTasks)*100):0;
+  const dueSoonCount=graph.scoped?.tasks?.dueSoonList?.length||0;
+
+  const totalForecast=inScope.reduce((sum,ctx)=>sum+(ctx.metrics?.budget?.forecast||0),0);
+  const totalActual=inScope.reduce((sum,ctx)=>sum+(ctx.metrics?.budget?.actual||0),0);
+  const hasBudget=totalForecast>0 || totalActual>0;
+  const totalVariance=totalActual-totalForecast;
+
+  const vendorTotal=inScope.reduce((sum,ctx)=>sum+ctx.vendors.length,0);
+  const eventsWithVendors=inScope.filter(ctx=>ctx.vendors.length>0).length;
+  const vendorCoverage=totalEvents?Math.round((eventsWithVendors/totalEvents)*100):0;
+  const avgVendors=totalEvents?vendorTotal/totalEvents:0;
+
+  const ratingsEntries=graph.scoped?.ratings?.entries||[];
+  const ratingsCount=ratingsEntries.length;
+  const avgRating=ratingsCount?graph.scoped.ratings.average:0;
+
+  const actualMetrics=[
+    {
+      label:"Events in scope",
+      value:String(totalEvents),
+      detail:statusSummary?`Status mix • ${statusSummary}`:"Status mix unavailable"
+    },
+    {
+      label:"Task throughput",
+      value:totalTasks?`${totalCompleted}/${totalTasks} (${completionRate}%)`:"0/0 (0%)",
+      detail:totalTasks?`${totalOverdue} overdue • ${dueSoonCount} due soon`:"No tasks captured"
+    },
+    {
+      label:"Budget coverage",
+      value:hasBudget?`${fmtMoney(totalForecast)} → ${fmtMoney(totalActual)}`:"—",
+      detail:hasBudget?`Variance ${totalVariance>=0?"+":"−"}${fmtMoney(Math.abs(totalVariance))}`:"No budget lines in scope"
+    },
+    {
+      label:"Vendor coverage",
+      value:totalEvents?`${vendorCoverage}%`:"—",
+      detail:totalEvents?`${eventsWithVendors}/${totalEvents} events with vendors • Avg ${avgVendors.toFixed(1)} vendors/event`:"No events to evaluate"
+    },
+    {
+      label:"Post-event ratings",
+      value:ratingsCount?avgRating.toFixed(2):"—",
+      detail:ratingsCount?`Based on ${ratingsCount} rating${ratingsCount===1?"":"s"}`:"No ratings captured yet"
+    }
+  ];
+
+  const metricsHtml=actualMetrics.map(metric=>{
+    const label=escapeAttr(metric.label);
+    const value=escapeAttr(metric.value);
+    const detail=metric.detail?`<div class="metric-detail">${escapeAttr(metric.detail)}</div>`:"";
+    return `<div class="analysis-metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div>${detail}</div>`;
+  }).join('');
+
+  actualEl.innerHTML=`<div class="analysis-metrics">${metricsHtml}</div>`;
+
+  const predictions=[];
+  const today=todayYMD();
+  const totalRemaining=Math.max(totalTasks-totalCompleted,0);
+
+  if(totalTasks){
+    const alpha=totalCompleted+1;
+    const beta=(totalTasks-totalCompleted)+1;
+    const projectedCompletion=(alpha/(alpha+beta))*100;
+    const std=Math.sqrt((alpha*beta)/(((alpha+beta)**2)*(alpha+beta+1)))*100;
+    const dueSoonNote=dueSoonCount?`${dueSoonCount} due within 7 days`:"No near-term deadlines";
+    predictions.push({
+      title:"Overall task readiness",
+      detail:`Projected completion ${projectedCompletion.toFixed(1)}% ±${std.toFixed(1)}%`,
+      meta:`${totalRemaining} task${totalRemaining===1?"":"s"} remaining • ${dueSoonNote}`
+    });
+  }
+
+  const projectBudgetFor=(budget={}, tasks={})=>{
+    const forecast=toNumber(budget?.forecast);
+    const actual=toNumber(budget?.actual);
+    if(!forecast && !actual) return 0;
+    const progress=Math.max((toNumber(tasks?.completionPercent)||0)/100,0.05);
+    let projected=actual>0?actual/Math.max(progress,0.05):forecast;
+    if(!Number.isFinite(projected) || projected<=0){
+      projected=forecast||actual||0;
+    }
+    if(forecast>0){
+      const upper=forecast*3;
+      projected=Math.min(Math.max(projected, actual), upper||projected);
+    }
+    return projected||0;
+  };
+
+  const projectedTotals=inScope.reduce((sum,ctx)=>sum+projectBudgetFor(ctx.metrics?.budget||{}, ctx.metrics?.tasks||{}),0);
+  if(hasBudget || projectedTotals){
+    const projectedVariance=projectedTotals-totalForecast;
+    predictions.push({
+      title:"Portfolio budget outlook",
+      detail:`Projected spend ${fmtMoney(projectedTotals)} (${projectedVariance>=0?"+":"−"}${fmtMoney(Math.abs(projectedVariance))} vs forecast)`,
+      meta:`Actual to date ${fmtMoney(totalActual)}`
+    });
+  }
+
+  const priorMean=4;
+  const priorWeight=2;
+  const ratingSum=ratingsEntries.reduce((sum,entry)=>sum+(Number(entry.rating)||0),0);
+  const denominator=ratingsCount+priorWeight;
+  const projectedRating=denominator? (ratingSum + priorMean*priorWeight)/denominator : priorMean;
+  predictions.push({
+    title:"Satisfaction forecast",
+    detail:`Projected rating ${projectedRating.toFixed(2)} / 5`,
+    meta:ratingsCount?`Current average ${avgRating.toFixed(2)} from ${ratingsCount} rating${ratingsCount===1?"":"s"}`:"No observed ratings yet — prior mean of 4.0 applied."
+  });
+
+  const eventPredictions=inScope.map(ctx=>{
+    const ev=ctx.event;
+    const tasks=ctx.metrics?.tasks||{ total:0, completed:0, completionPercent:0 };
+    if(!tasks.total) return null;
+    const alpha=tasks.completed+1;
+    const beta=(tasks.total-tasks.completed)+1;
+    const projected=(alpha/(alpha+beta))*100;
+    const std=Math.sqrt((alpha*beta)/(((alpha+beta)**2)*(alpha+beta+1)))*100;
+    const open=Math.max(tasks.total-tasks.completed,0);
+    const daysRemaining=ev?.eventDate?diffInDays(ev.eventDate, today):null;
+    let timeDescriptor="Date TBD";
+    if(daysRemaining!==null){
+      if(daysRemaining>0){
+        timeDescriptor=`${daysRemaining} day${daysRemaining===1?"":"s"} remaining`;
+      }else if(daysRemaining===0){
+        timeDescriptor="Event day";
+      }else{
+        const overdueDays=Math.abs(daysRemaining);
+        timeDescriptor=`Past due by ${overdueDays} day${overdueDays===1?"":"s"}`;
+      }
+    }
+    const riskBase=projected-std;
+    let riskLabel="On track";
+    if(riskBase<85) riskLabel="Monitor";
+    if(riskBase<70 || (daysRemaining!==null && daysRemaining<=7 && open>0)) riskLabel="At risk";
+    const budget=ctx.metrics?.budget||{};
+    const projectedBudget=projectBudgetFor(budget, tasks);
+    const variance=projectedBudget-toNumber(budget?.forecast||0);
+    const metaParts=[`${open} open task${open===1?"":"s"}`, timeDescriptor];
+    if(budget.forecast || budget.actual){
+      metaParts.push(`Budget outlook ${variance>=0?"+":"−"}${fmtMoney(Math.abs(variance))}`);
+    }
+    return {
+      title:`${ev?.title||"Untitled event"} — ${riskLabel}`,
+      detail:`${projected.toFixed(1)}% ±${std.toFixed(1)}% completion projection`,
+      meta:metaParts.join(' • '),
+      projected,
+      riskOrder:riskLabel==="At risk"?0:riskLabel==="Monitor"?1:2
+    };
+  }).filter(Boolean)
+    .sort((a,b)=>a.riskOrder-b.riskOrder || a.projected-b.projected)
+    .slice(0,3);
+
+  eventPredictions.forEach(item=>predictions.push(item));
+
+  if(!predictions.length){
+    predictionsEl.innerHTML='<p class="muted">Not enough data for predictions yet.</p>';
+    return;
+  }
+
+  const predictionsHtml=predictions.map(item=>{
+    const title=escapeAttr(item.title);
+    const detail=item.detail?`<div class="analysis-item-detail">${escapeAttr(item.detail)}</div>`:"";
+    const meta=item.meta?`<div class="analysis-item-meta">${escapeAttr(item.meta)}</div>`:"";
+    return `<li><div class="analysis-item-title">${title}</div>${detail}${meta}</li>`;
+  }).join('');
+
+  predictionsEl.innerHTML=`<ul class="analysis-list">${predictionsHtml}</ul>`;
+}
+
 /* ---------- Events table & form actions ---------- */
 function renderEventsTable(){
   const list=qs("#eventCards"); if(!list) return; list.innerHTML="";
@@ -2634,6 +2871,7 @@ function renderAll(context){
   renderKPIs();
   renderEventConnectivity();
   renderDataHealth();
+  renderAnalysis();
   renderEventsTable();
   renderTasksTable();
   renderKanban();
