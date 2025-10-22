@@ -195,6 +195,19 @@ Perf notes:
     .icon{width:18px;height:18px;display:inline-block}
     main{padding:18px;max-width:1320px;margin:0 auto calc(56px + env(safe-area-inset-bottom))}
     .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+    .analysis-tab{display:flex;flex-direction:column;gap:16px}
+    .analysis-grid{display:grid;gap:16px}
+    @media (min-width:900px){.analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .analysis-card{display:flex;flex-direction:column;gap:16px}
+    .analysis-card h3{margin:0;font-size:20px;font-weight:700;color:var(--heading)}
+    .analysis-card h4{margin:0;font-size:16px;font-weight:700;color:var(--heading)}
+    .analysis-card p{margin:0;color:var(--muted)}
+    .analysis-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+    .analysis-list li{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--card)}
+    .analysis-metric-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+    .analysis-label{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
+    .analysis-value{font-size:22px;font-weight:700;color:var(--heading)}
+    .analysis-detail{margin-top:6px;font-size:13px;line-height:1.5;color:var(--muted)}
     .connectivity-card{margin-top:18px;display:flex;flex-direction:column;gap:14px;}
     .relationship-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;}
     .relationship-item{border:1px solid var(--border);border-radius:12px;padding:12px;background:var(--card);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px;}
@@ -507,6 +520,7 @@ header .scope{display:inline-flex; align-items:center; gap:8px}
 </div>
   <nav role="navigation" aria-label="Primary">
     <button class="tab-btn" data-testid="nav-dashboard" data-route="#/dashboard" aria-current="page">Dashboard</button>
+    <button class="tab-btn" data-testid="nav-analysis" data-route="#/analysis">Analysis</button>
     <button class="tab-btn" data-testid="nav-events" data-route="#/events">Events</button>
     <button class="tab-btn" data-testid="nav-post" data-route="#/post">Post-Event</button>
     <button class="tab-btn" data-testid="nav-timeline" data-route="#/timeline">Timeline</button>
@@ -595,6 +609,28 @@ header .scope{display:inline-flex; align-items:center; gap:8px}
         <div class="small muted">Spot missing associations and orphaned records to strengthen BI insights.</div>
       </div>
       <div id="dataHealth" class="relationship-health-grid"></div>
+    </div>
+  </section>
+
+  <!-- ANALYSIS -->
+  <section id="analysis" class="tab analysis-tab" role="region" aria-labelledby="h-analysis" hidden>
+    <div class="analysis-grid">
+      <article class="card analysis-card">
+        <div class="row">
+          <h3 id="h-analysis">Analysis</h3>
+          <div class="spacer"></div>
+          <p class="small muted">Full review of operational metrics based on the current scope.</p>
+        </div>
+        <div id="analysisActual" aria-labelledby="h-analysis"></div>
+      </article>
+      <article class="card analysis-card">
+        <div class="row">
+          <h4 id="h-analysis-forecast">Statistical Predictions</h4>
+          <div class="spacer"></div>
+          <p class="small muted">Forward-looking projections derived from recent performance.</p>
+        </div>
+        <div id="analysisPredictions" aria-labelledby="h-analysis-forecast"></div>
+      </article>
     </div>
   </section>
 
@@ -1222,7 +1258,7 @@ const state={
 let eventAddrAuto=null;
 let poiAddrAuto=null;
 /* ---------- Router (hash) ---------- */
-const ROUTES=["#/dashboard","#/events","#/timeline","#/vendors","#/budget","#/tasks","#/map","#/settings","#/post"];
+const ROUTES=["#/dashboard","#/analysis","#/events","#/timeline","#/vendors","#/budget","#/tasks","#/map","#/settings","#/post"];
 function navigate(hash){
   const h=ROUTES.includes(hash)?hash:"#/dashboard";
   if(location.hash!==h) location.hash=h;
@@ -2213,6 +2249,248 @@ function renderDataHealth(){
   container.appendChild(frag);
 }
 
+function buildAnalysisList(items){
+  const list=document.createElement("ul");
+  list.className="analysis-list";
+  (items||[]).forEach(item=>{
+    if(!item || !item.label) return;
+    const li=document.createElement("li");
+    const head=document.createElement("div");
+    head.className="analysis-metric-head";
+    const label=document.createElement("span");
+    label.className="analysis-label";
+    label.textContent=item.label;
+    const value=document.createElement("span");
+    value.className="analysis-value";
+    value.textContent=item.value ?? "";
+    head.appendChild(label);
+    head.appendChild(value);
+    li.appendChild(head);
+    if(item.detail){
+      const detail=document.createElement("p");
+      detail.className="analysis-detail";
+      detail.textContent=item.detail;
+      li.appendChild(detail);
+    }
+    list.appendChild(li);
+  });
+  return list;
+}
+
+function linearRegression(points){
+  if(!Array.isArray(points) || !points.length){
+    return { slope:0, intercept:0 };
+  }
+  if(points.length===1){
+    const single=points[0];
+    return { slope:0, intercept:Number(single?.y)||0 };
+  }
+  let sumX=0,sumY=0,sumXY=0,sumXX=0;
+  points.forEach(pt=>{
+    const x=Number(pt?.x)||0;
+    const y=Number(pt?.y)||0;
+    sumX+=x; sumY+=y; sumXY+=x*y; sumXX+=x*x;
+  });
+  const n=points.length;
+  const denom=(n*sumXX)-(sumX*sumX);
+  const slope=denom===0?0:((n*sumXY)-(sumX*sumY))/denom;
+  const intercept=(sumY-(slope*sumX))/n;
+  return { slope, intercept };
+}
+
+function incrementMonthKey(ym){
+  if(!ym || typeof ym!=="string" || ym.length<7) return ym||"";
+  const parts=ym.split("-");
+  if(parts.length<2) return ym;
+  let year=Number(parts[0]);
+  let month=Number(parts[1]);
+  if(!Number.isFinite(year) || !Number.isFinite(month)) return ym;
+  month+=1;
+  if(month>12){ month=1; year+=1; }
+  return `${String(year).padStart(4,"0")}-${String(month).padStart(2,"0")}`;
+}
+
+function formatMonthLabel(ym){
+  if(!ym) return "Next period";
+  const parts=ym.split("-");
+  if(parts.length<2) return ym;
+  const year=Number(parts[0]);
+  const month=Number(parts[1]);
+  if(!Number.isFinite(year) || !Number.isFinite(month)) return ym;
+  const date=new Date(year,Math.max(0,month-1),1);
+  if(Number.isNaN(date.getTime())) return ym;
+  return date.toLocaleString(undefined,{ month:"short", year:"numeric" });
+}
+
+function renderAnalysis(){
+  const actualContainer=qs("#analysisActual");
+  const forecastContainer=qs("#analysisPredictions");
+  if(!(actualContainer && forecastContainer)) return;
+  actualContainer.innerHTML="";
+  forecastContainer.innerHTML="";
+
+  const graph=state.graph;
+  if(!graph){
+    actualContainer.innerHTML='<p class="muted">Analysis becomes available once data loads.</p>';
+    forecastContainer.innerHTML='<p class="muted">Predictions become available once data loads.</p>';
+    return;
+  }
+
+  const scopedEvents=filteredEvents();
+  const scopeIds=graph.scopeIds||new Set();
+  const contexts=graph.contexts||new Map();
+  const contextsInScope=scopedEvents.map(ev=>contexts.get(ev.id)).filter(Boolean);
+  const budgetLines=(store.data.budget||[]).filter(line=>{
+    if(!line) return false;
+    if(line.eventId && scopeIds.size && !scopeIds.has(line.eventId)) return false;
+    return true;
+  });
+  const budgetTotals=budgetLines.reduce((acc,line)=>{
+    const fc=toNumber(line.forecast) || (toNumber(line.qty)*toNumber(line.unit)*(1+toNumber(line.tax)/100));
+    const act=toNumber(line.actual);
+    acc.forecast+=fc;
+    acc.actual+=act;
+    return acc;
+  },{ forecast:0, actual:0 });
+
+  if(!scopedEvents.length){
+    actualContainer.innerHTML='<p class="muted">No events match the current filters. Adjust filters to review analysis.</p>';
+  }else{
+    const statusCounts=new Map();
+    scopedEvents.forEach(ev=>{
+      const key=(ev.status||"Unspecified").trim()||"Unspecified";
+      statusCounts.set(key,(statusCounts.get(key)||0)+1);
+    });
+    const statusSummary=Array.from(statusCounts.entries())
+      .sort((a,b)=>a[0].localeCompare(b[0]))
+      .map(([status,count])=>`${status}: ${count}`)
+      .join(" • ");
+
+    const tasks=graph.scoped?.tasks||{ total:0, completed:0, overdueCount:0, completionPercent:0, dueSoonList:[] };
+    const variance=budgetTotals.actual-budgetTotals.forecast;
+    const vendorTotal=contextsInScope.reduce((sum,ctx)=>sum+((ctx?.vendors||[]).length),0);
+    const vendorless=contextsInScope.filter(ctx=>(ctx?.vendors||[]).length===0).length;
+    const avgVendors=contextsInScope.length?vendorTotal/contextsInScope.length:0;
+    const ratings=graph.scoped?.ratings||{ average:0, entries:[] };
+
+    const metrics=[
+      {
+        label:"Events in scope",
+        value:String(scopedEvents.length),
+        detail:statusSummary || "No status data captured for filtered events."
+      },
+      {
+        label:"Task progress",
+        value:tasks.total?`${tasks.completionPercent||0}%`:"—",
+        detail:tasks.total
+          ? `${tasks.completed||0}/${tasks.total} completed • ${tasks.overdueCount||0} overdue`
+          : "No tasks linked to the current scope."
+      },
+      {
+        label:"Budget burn",
+        value:(budgetTotals.forecast||budgetTotals.actual)?fmtMoney(budgetTotals.actual):"—",
+        detail:(budgetTotals.forecast||budgetTotals.actual)
+          ? `Forecast ${fmtMoney(budgetTotals.forecast)} • Variance ${fmtMoney(variance)}`
+          : "Add budget lines to see financial metrics."
+      },
+      {
+        label:"Vendor coverage",
+        value:vendorTotal?`${vendorTotal} linked`:"0 linked",
+        detail:contextsInScope.length
+          ? `Avg ${avgVendors.toFixed(1)} vendors/event • ${vendorless} event${vendorless===1?"":"s"} without vendors`
+          : "No events selected for scope."
+      },
+      {
+        label:"Client satisfaction",
+        value:(ratings.entries||[]).length?ratings.average.toFixed(2):"—",
+        detail:(ratings.entries||[]).length
+          ? `Based on ${(ratings.entries||[]).length} rating${ratings.entries.length===1?"":"s"}.`
+          : "Capture post-event ratings to track satisfaction."
+      }
+    ];
+    actualContainer.appendChild(buildAnalysisList(metrics));
+  }
+
+  const predictions=[];
+
+  const eventsAll=(store.data.events||[]).filter(ev=>ev&&ev.eventDate);
+  if(eventsAll.length){
+    const monthCounts=new Map();
+    eventsAll.forEach(ev=>{
+      const ym=(ev.eventDate||"").slice(0,7);
+      if(!ym) return;
+      monthCounts.set(ym,(monthCounts.get(ym)||0)+1);
+    });
+    const sortedMonths=Array.from(monthCounts.keys()).sort();
+    if(sortedMonths.length){
+      const points=sortedMonths.map((month,idx)=>({ x:idx+1, y:monthCounts.get(month) }));
+      const trend=linearRegression(points);
+      const nextIndex=points.length+1;
+      let projected=Math.round(trend.intercept + trend.slope*nextIndex);
+      if(!Number.isFinite(projected) || projected<0){
+        const lastMonth=points[points.length-1];
+        projected=Math.max(0,Math.round(Number(lastMonth?.y)||0));
+      }
+      const nextMonthKey=incrementMonthKey(sortedMonths[sortedMonths.length-1]);
+      predictions.push({
+        label:"Projected events next month",
+        value:String(projected),
+        detail:`Trend from ${sortedMonths.length} month${sortedMonths.length===1?"":"s"}; next period ${formatMonthLabel(nextMonthKey)}`
+      });
+    }
+  }
+
+  if(budgetTotals.forecast>0){
+    const realized=budgetLines.reduce((acc,line)=>{
+      const fc=toNumber(line.forecast) || (toNumber(line.qty)*toNumber(line.unit)*(1+toNumber(line.tax)/100));
+      const act=toNumber(line.actual);
+      if(act>0){
+        acc.forecast+=fc;
+        acc.actual+=act;
+        acc.count+=1;
+      }
+      return acc;
+    },{ forecast:0, actual:0, count:0 });
+    const ratio=realized.forecast>0?(realized.actual/realized.forecast):1;
+    const safeRatio=(Number.isFinite(ratio)&&ratio>0)?ratio:1;
+    const remaining=Math.max(0,budgetTotals.forecast-realized.forecast);
+    const projectedSpend=budgetTotals.actual + remaining*safeRatio;
+    predictions.push({
+      label:"Forecasted spend at completion",
+      value:fmtMoney(projectedSpend),
+      detail:realized.count
+        ? `Based on ${realized.count} realized line${realized.count===1?"":"s"} at ${ratio.toFixed(2)}× forecast trend.`
+        : "No actual spend recorded yet; assumes full forecast."
+    });
+  }
+
+  const tasksMetrics=graph.scoped?.tasks;
+  if(tasksMetrics && tasksMetrics.total){
+    const open=Math.max(0,(tasksMetrics.total||0)-(tasksMetrics.completed||0));
+    const dueSoonCount=(tasksMetrics.dueSoonList||[]).length||0;
+    const potential=Math.min(100,Math.round(((tasksMetrics.completed||0)+Math.min(open,dueSoonCount))/(tasksMetrics.total||1)*100));
+    let detailText;
+    if(open===0){
+      detailText="All tasks completed; maintain momentum for upcoming events.";
+    }else if(dueSoonCount>0){
+      detailText=`If ${dueSoonCount} due-soon task${dueSoonCount===1?"":"s"} finish, completion reaches ${potential}%.`;
+    }else{
+      detailText=`${open} task${open===1?"":"s"} remain open; completion currently ${tasksMetrics.completionPercent||0}%.`;
+    }
+    predictions.push({
+      label:"Completion potential (next 7 days)",
+      value:`${potential}%`,
+      detail:detailText
+    });
+  }
+
+  if(predictions.length){
+    forecastContainer.appendChild(buildAnalysisList(predictions));
+  }else{
+    forecastContainer.innerHTML='<p class="muted">Add more historical data to unlock projections.</p>';
+  }
+}
+
 /* ---------- Events table & form actions ---------- */
 function renderEventsTable(){
   const list=qs("#eventCards"); if(!list) return; list.innerHTML="";
@@ -2634,6 +2912,7 @@ function renderAll(context){
   renderKPIs();
   renderEventConnectivity();
   renderDataHealth();
+  renderAnalysis();
   renderEventsTable();
   renderTasksTable();
   renderKanban();
